@@ -22,6 +22,22 @@ def test_readiness_uses_the_morning_score():
     assert T.latest_entry(fake.READINESS)["score"] == 61
 
 
+def test_readiness_on_a_new_watch_is_marked_not_ready():
+    # Real response from a Forerunner 970 on its first day.
+    e = {"calendarDate": "2026-10-25", "score": None, "level": "NONE", "feedbackShort": "UNKNOWN",
+         "hrvWeeklyAverage": 511, "sleepScoreFactorPercent": 0, "inputContext": "AFTER_WAKEUP_RESET"}
+    assert T.readiness(e) == {"date": "2026-10-25", "score": None, "note": "not calculated yet"}
+    assert T.readiness({**fake.READINESS[1], "hrvWeeklyAverage": 511})["hrv_weekly_avg"] is None
+
+
+def test_training_status_empty_on_a_new_watch():
+    raw = {"userId": 1, "mostRecentVO2Max": None, "mostRecentTrainingLoadBalance": None,
+           "mostRecentTrainingStatus": None, "heatAltitudeAcclimationDTO": None}
+    assert T.training_status(raw) is None
+    top = {**raw, "heatAltitudeAcclimationDTO": {"heatAcclimationPercentage": 20}}
+    assert T.training_status(top)["heat_acclimation_pct"] == 20
+
+
 def test_readiness_by_day_picks_one_row_per_day():
     rows = T.readiness_by_day(fake.READINESS_RANGE)
     assert [(r["date"], r["score"]) for r in rows] == [("2026-10-24", 48), ("2026-10-25", 72)]

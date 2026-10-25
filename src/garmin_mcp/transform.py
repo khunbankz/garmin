@@ -133,7 +133,12 @@ def readiness(e: dict[str, Any] | None) -> dict[str, Any] | None:
             "feedback": phrase(e.get(f"{prefix}FactorFeedback")),
         }
 
+    if e.get("score") is None:
+        # A new watch, or no valid sleep yet: Garmin sends an entry with
+        # level NONE, zeroed factors and placeholder numbers.
+        return {"date": e.get("calendarDate"), "score": None, "note": "not calculated yet"}
     recovery_min = e.get("recoveryTime")
+    hrv_week = e.get("hrvWeeklyAverage")
     return {
         "date": e.get("calendarDate"),
         "time": (e.get("timestampLocal") or "")[11:16] or None,
@@ -142,7 +147,8 @@ def readiness(e: dict[str, Any] | None) -> dict[str, Any] | None:
         "feedback": phrase(e.get("feedbackShort")),
         "recovery_time_h": rnd(recovery_min / 60, 1) if isinstance(recovery_min, (int, float)) else None,
         "acute_load": e.get("acuteLoad"),
-        "hrv_weekly_avg": e.get("hrvWeeklyAverage"),
+        # Seen as 511 on a watch without an HRV baseline yet; real RMSSD is far lower.
+        "hrv_weekly_avg": hrv_week if isinstance(hrv_week, (int, float)) and 0 < hrv_week < 250 else None,
         "sleep_score": e.get("sleepScore"),
         "factors": {
             "sleep": factor("sleepScore"),
@@ -250,6 +256,11 @@ def day_stats(s: dict[str, Any] | None) -> dict[str, Any] | None:
 # ---------------------------------------------------------- training status
 
 
+def heat_acclimation(payload: Any) -> dict[str, Any] | None:
+    """Garmin has sent this both inside mostRecentVO2Max and at the top level."""
+    return get(payload, "mostRecentVO2Max", "heatAltitudeAcclimation") or get(payload, "heatAltitudeAcclimationDTO")
+
+
 def training_status(payload: dict[str, Any] | None) -> dict[str, Any] | None:
     if not payload:
         return None
@@ -259,7 +270,9 @@ def training_status(payload: dict[str, Any] | None) -> dict[str, Any] | None:
         get(payload, "mostRecentTrainingLoadBalance", "metricsTrainingLoadBalanceDTOMap")
     ) or {}
     vo2 = get(payload, "mostRecentVO2Max", "generic") or {}
-    heat = get(payload, "mostRecentVO2Max", "heatAltitudeAcclimation") or {}
+    heat = heat_acclimation(payload) or {}
+    if not (st or bal or vo2 or heat):
+        return None  # e.g. a new watch: every section is null
 
     def band(lo: str, hi: str) -> list[Any] | None:
         a, b = bal.get(lo), bal.get(hi)

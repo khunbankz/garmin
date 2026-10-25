@@ -89,7 +89,7 @@ def performance(api: Any) -> dict[str, Any]:
         "lactate_threshold": _section(lambda: T.lactate_threshold(api.get_lactate_threshold(latest=True))),
         "race_predictions": _section(lambda: T.race_predictions(api.get_race_predictions())),
         "heat_acclimation_pct": _section(
-            lambda: T.get(api.get_training_status(d.isoformat()), "mostRecentVO2Max", "heatAltitudeAcclimation", "heatAcclimationPercentage")
+            lambda: T.get(T.heat_acclimation(api.get_training_status(d.isoformat())), "heatAcclimationPercentage")
         ),
     }
 
