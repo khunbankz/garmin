@@ -1,0 +1,31 @@
+[project]
+name = "garmin-mcp"
+version = "0.1.0"
+description = "Local, read-only MCP server for your own Garmin Connect data (readiness, HRV, training load, VO2max, race predictor, running dynamics)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Unofficial Garmin Connect client. Garmin changes its login from time to
+    # time and this library follows quickly, so allow 0.3.x updates.
+    "garminconnect>=0.3.20,<0.4",
+    "mcp>=2.3,<3",
+]
+
+[project.scripts]
+garmin-mcp = "garmin_mcp.server:main"
+garmin-mcp-auth = "garmin_mcp.cli_auth:main"
+garmin-mcp-export = "garmin_mcp.cli_export:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/garmin_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
