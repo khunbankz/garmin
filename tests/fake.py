@@ -389,8 +389,10 @@ class FakeGarmin:
         items: list[dict[str, Any]] = [
             {"id": 9, "itemType": "activity", "date": f"{prefix}05", "title": "Morning Run"}
         ]
+        # Like Garmin's month grid: the first week of the next month shows too.
+        nxt = f"{year + month // 12}-{month % 12 + 1:02d}-0"
         for sid, sch in self.schedules.items():
-            if sch["calendarDate"].startswith(prefix):
+            if sch["calendarDate"].startswith(prefix) or sch["calendarDate"].startswith(nxt):
                 wid = sch["workout"]["workoutId"]
                 items.append({"id": sid, "itemType": "workout", "date": sch["calendarDate"],
                               "title": self.workouts[wid]["workoutName"], "workoutId": wid})

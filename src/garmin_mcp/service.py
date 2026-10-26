@@ -190,11 +190,15 @@ def scheduled_workouts(api: Any, start: date, end: date) -> list[dict[str, Any]]
     """Workouts on the Garmin calendar between two days (from the calendar service)."""
     s, e = start.isoformat(), end.isoformat()
     rows = []
+    seen: set[Any] = set()
     for y, m in _months(start, end):
         cal = api.get_scheduled_workouts(y, m) or {}
         for item in cal.get("calendarItems") or []:
             d = item.get("date") or ""
-            if item.get("itemType") == "workout" and s <= d <= e:
+            # A month view also carries the edge days of the months around it.
+            key = (item.get("id"), d)
+            if item.get("itemType") == "workout" and s <= d <= e and key not in seen:
+                seen.add(key)
                 rows.append(
                     {
                         "date": d,
