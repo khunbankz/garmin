@@ -49,9 +49,8 @@ def test_daily_rows_merge_range_and_per_day_calls():
     assert rows[0]["readiness"] == 48 and rows[1]["readiness"] == 72
     assert rows[0]["hrv_ms"] == 35 and rows[0]["hrv_status"] == "unbalanced"
     assert rows[1]["sleep_score"] == 78 and rows[1]["acute_load"] == 612 and rows[1]["vo2max"] == 47.6
-    # 10-24 came from get_daily_summaries, 10-25 needed a per-day call.
-    assert ("get_user_summary", ("2026-10-25",)) in api.calls
-    assert ("get_user_summary", ("2026-10-24",)) not in api.calls
+    assert rows[0]["rhr"] == 49 and rows[0]["body_battery_wake"] == 81
+    assert ("get_user_summary", ("2026-10-24",)) in api.calls
     # Race predictor and load focus for the tracker cards.
     assert rows[0]["race_marathon_s"] == 14900 and rows[1]["race_half_s"] == 6912
     assert rows[1]["load_anaerobic"] == 35 and rows[1]["load_anaerobic_min"] == 90

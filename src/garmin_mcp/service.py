@@ -137,14 +137,10 @@ def daily_rows(api: Any, start: date, end: date, pause: float = 0.0) -> list[dic
     s, e = start.isoformat(), end.isoformat()
     ready = {r["date"]: r for r in _section(lambda: readiness_range(api, start, end)) or [] if isinstance(r, dict) and r.get("date")}
     hrv = {r["date"]: r for r in _section(lambda: hrv_range(api, start, end)) or [] if isinstance(r, dict) and r.get("date")}
-    summaries = _section(lambda: api.get_daily_summaries(s, e))
-    stats_list = summaries.get("data") if isinstance(summaries, dict) else summaries
-    stats = {
-        x.get("calendarDate"): T.day_stats(x)
-        for x in stats_list or []
-        if isinstance(x, dict) and x.get("calendarDate")
-    }
-    race = _section(lambda: T.race_seconds_by_day(api.get_race_predictions(s, e, "daily")))
+    # Day stats come from get_user_summary per day: the range endpoint
+    # (get_daily_summaries) leaves resting HR and Body Battery empty.
+    stats: dict[str, Any] = {}
+    race =_section(lambda: T.race_seconds_by_day(api.get_race_predictions(s, e, "daily")))
     race = race if isinstance(race, dict) and "error" not in race else {}
     vo2 = _section(lambda: T.vo2max_by_day(api.get_max_metrics_range(s, e)))
     vo2 = vo2 if isinstance(vo2, dict) and "error" not in vo2 else {}
