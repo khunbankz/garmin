@@ -448,6 +448,37 @@ def laps(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
 # ------------------------------------------------------------- daily rows
 
 
+def race_seconds_by_day(payload: Any) -> dict[str, dict[str, Any]]:
+    """Daily race predictor answer -> {date: {race_5k_s, ...}}."""
+    items = payload if isinstance(payload, list) else [payload]
+    out: dict[str, dict[str, Any]] = {}
+    for p in items:
+        if not isinstance(p, dict):
+            continue
+        day = p.get("calendarDate") or p.get("fromCalendarDate")
+        if not day or not any(p.get(k) for _, k in RACES):
+            continue
+        out[str(day)[:10]] = {f"race_{name}_s": rnd(p.get(key), 0) for name, key in RACES}
+    return out
+
+
+def vo2max_by_day(payload: Any) -> dict[str, float]:
+    """Max-metrics range answer -> {date: running VO2 max}."""
+    items = payload if isinstance(payload, list) else (payload or {}).get("data") or [payload]
+    out: dict[str, float] = {}
+    for it in items:
+        g = get(it, "generic")
+        if isinstance(g, dict) and g.get("calendarDate"):
+            v = g.get("vo2MaxPreciseValue") or g.get("vo2MaxValue")
+            if v:
+                out[str(g["calendarDate"])[:10]] = rnd(v, 1)
+    return out
+
+
+def _pair(v: Any, i: int) -> Any:
+    return v[i] if isinstance(v, list) and len(v) > i else None
+
+
 def daily_row(
     day: str,
     ready: dict[str, Any] | None,
@@ -455,8 +486,11 @@ def daily_row(
     slp: dict[str, Any] | None,
     stats: dict[str, Any] | None,
     status: dict[str, Any] | None,
+    race: dict[str, Any] | None = None,
+    vo2: float | None = None,
 ) -> dict[str, Any]:
     """One flat row per day for trends and the tracker."""
+    focus = get(status, "load_focus") or {}
     return {
         "date": day,
         "readiness": get(ready, "score"),
@@ -478,6 +512,56 @@ def daily_row(
         "training_status": get(status, "status"),
         "acute_load": get(status, "acute_load"),
         "chronic_load": get(status, "chronic_load"),
+        "chronic_min": _pair(get(status, "chronic_optimal_range"), 0),
+        "chronic_max": _pair(get(status, "chronic_optimal_range"), 1),
         "acwr": get(status, "acwr"),
-        "vo2max": get(status, "vo2max"),
+        "acwr_status": get(status, "acwr_status"),
+        "weekly_load": get(status, "weekly_load"),
+        "weekly_load_min": _pair(get(status, "load_target_range"), 0),
+        "weekly_load_max": _pair(get(status, "load_target_range"), 1),
+        "load_aerobic_low": focus.get("aerobic_low"),
+        "load_aerobic_low_min": _pair(focus.get("aerobic_low_target"), 0),
+        "load_aerobic_low_max": _pair(focus.get("aerobic_low_target"), 1),
+        "load_aerobic_high": focus.get("aerobic_high"),
+        "load_aerobic_high_min": _pair(focus.get("aerobic_high_target"), 0),
+        "load_aerobic_high_max": _pair(focus.get("aerobic_high_target"), 1),
+        "load_anaerobic": focus.get("anaerobic"),
+        "load_anaerobic_min": _pair(focus.get("anaerobic_target"), 0),
+        "load_anaerobic_max": _pair(focus.get("anaerobic_target"), 1),
+        "load_focus_feedback": focus.get("feedback"),
+        "vo2max": get(status, "vo2max") or vo2,
+        "race_5k_s": get(race, "race_5k_s"),
+        "race_10k_s": get(race, "race_10k_s"),
+        "race_half_s": get(race, "race_half_s"),
+        "race_marathon_s": get(race, "race_marathon_s"),
+    }
+
+
+def run_row(a: dict[str, Any]) -> dict[str, Any]:
+    """A Garmin run as flat numbers, for the tracker's table."""
+    dist = a.get("distance")
+    moving = a.get("movingDuration") or a.get("duration")
+    stride = first(a, "avgStrideLength", "strideLength")
+    start = str(a.get("startTimeLocal") or "")
+    return {
+        "id": str(a.get("activityId") or ""),
+        "date": start[:10],
+        "time": start[11:16],
+        "name": a.get("activityName"),
+        "type": get(a, "activityType", "typeKey"),
+        "km": rnd(dist / 1000, 3) if isinstance(dist, (int, float)) else None,
+        "moving_s": rnd(moving, 0),
+        "avg_hr": rnd(a.get("averageHR"), 0),
+        "max_hr": rnd(a.get("maxHR"), 0),
+        "cadence_spm": rnd(first(a, "averageRunningCadenceInStepsPerMinute", "averageRunCadence"), 0),
+        "stride_m": rnd(stride / 100, 2) if isinstance(stride, (int, float)) else None,
+        "ground_contact_ms": rnd(first(a, "avgGroundContactTime", "groundContactTime"), 0),
+        "vertical_osc_cm": rnd(first(a, "avgVerticalOscillation", "verticalOscillation"), 1),
+        "vertical_ratio_pct": rnd(first(a, "avgVerticalRatio", "verticalRatio"), 1),
+        "power_w": rnd(first(a, "avgPower", "averagePower"), 0),
+        "te_aerobic": rnd(first(a, "aerobicTrainingEffect", "trainingEffect"), 1),
+        "te_anaerobic": rnd(a.get("anaerobicTrainingEffect"), 1),
+        "te_label": phrase(a.get("trainingEffectLabel")),
+        "load": rnd(a.get("activityTrainingLoad"), 0),
+        "vo2max": a.get("vO2MaxValue"),
     }

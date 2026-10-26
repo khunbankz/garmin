@@ -53,10 +53,11 @@ Restart Claude Desktop and ask: *"What's my Garmin training readiness today?"*
 ## Export daily rows
 
 ```bash
-uv run garmin-mcp-export --start 2026-10-20 --out exports/garmin-daily.json   # --end defaults to today
+uv run garmin-mcp-export --start 2026-10-25 --out exports/garmin-daily.json \
+    --runs-out exports/garmin-runs.json   # --end defaults to today
 ```
 
-Same rows as `get_daily`, fetched 31 days at a time with a short pause between per-day calls. `exports/` is git-ignored.
+Daily rows are the `get_daily` fields plus the race predictor (seconds), load focus with its target band, weekly load target and chronic-load range; fetched 31 days at a time with a short pause between per-day calls. `--runs-out` also writes every Garmin run in the span as flat numbers (distance, moving time, HR, cadence, stride, ground contact, power, Training Effect and load). `exports/` is git-ignored.
 
 ## Troubleshooting
 

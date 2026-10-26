@@ -37,7 +37,10 @@ def test_status(home, capsys):
 def test_export_writes_daily_rows(home, tmp_path):
     (home / "garmin_tokens.json").write_text("{}")
     out = tmp_path / "out" / "garmin-daily.json"
-    cli_export.main(["--start", "2026-10-23", "--end", "2026-10-25", "--out", str(out), "--pause", "0"])
+    runs_out = tmp_path / "out" / "garmin-runs.json"
+    cli_export.main(["--start", "2026-10-23", "--end", "2026-10-25", "--out", str(out),
+                     "--runs-out", str(runs_out), "--pause", "0"])
     rows = json.loads(out.read_text())
     assert [r["date"] for r in rows] == ["2026-10-23", "2026-10-24", "2026-10-25"]
     assert rows[-1]["readiness"] == 72
+    assert json.loads(runs_out.read_text())[0]["te_label"] == "aerobic base"

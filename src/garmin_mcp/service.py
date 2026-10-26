@@ -144,6 +144,10 @@ def daily_rows(api: Any, start: date, end: date, pause: float = 0.0) -> list[dic
         for x in stats_list or []
         if isinstance(x, dict) and x.get("calendarDate")
     }
+    race = _section(lambda: T.race_seconds_by_day(api.get_race_predictions(s, e, "daily")))
+    race = race if isinstance(race, dict) and "error" not in race else {}
+    vo2 = _section(lambda: T.vo2max_by_day(api.get_max_metrics_range(s, e)))
+    vo2 = vo2 if isinstance(vo2, dict) and "error" not in vo2 else {}
     rows = []
     for d in each_day(start, end):
         k = d.isoformat()
@@ -159,11 +163,19 @@ def daily_rows(api: Any, start: date, end: date, pause: float = 0.0) -> list[dic
                 slp if isinstance(slp, dict) and "error" not in slp else None,
                 stats.get(k) if isinstance(stats.get(k), dict) and "error" not in stats[k] else None,
                 status if isinstance(status, dict) and "error" not in status else None,
+                race.get(k),
+                vo2.get(k),
             )
         )
         if pause:
             time.sleep(pause)
     return rows
+
+
+def run_rows(api: Any, start: date, end: date) -> list[dict[str, Any]]:
+    """Garmin runs (all running sub-types) as flat rows, oldest first."""
+    raw = api.get_activities_by_date(start.isoformat(), end.isoformat(), "running", "asc")
+    return [T.run_row(a) for a in raw or [] if isinstance(a, dict)]
 
 
 # Read-only methods the debug tool may call, with the arguments each takes.

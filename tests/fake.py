@@ -308,6 +308,10 @@ class FakeGarmin:
         self._rec("get_max_metrics", d)
         return [{"generic": None}]
 
+    def get_max_metrics_range(self, s: str, e: str) -> list[dict[str, Any]]:
+        self._rec("get_max_metrics_range", s, e)
+        return [{"generic": {"calendarDate": "2026-10-24", "vo2MaxPreciseValue": 47.2}}]
+
     def get_lactate_threshold(self, *, latest: bool = True) -> dict[str, Any]:
         self._rec("get_lactate_threshold")
         return {"speed_and_heart_rate": {"calendarDate": "2026-10-20", "speed": 0.31944, "heartRate": 166}, "power": {}}

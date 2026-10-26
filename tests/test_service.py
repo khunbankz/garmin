@@ -52,6 +52,25 @@ def test_daily_rows_merge_range_and_per_day_calls():
     # 10-24 came from get_daily_summaries, 10-25 needed a per-day call.
     assert ("get_user_summary", ("2026-10-25",)) in api.calls
     assert ("get_user_summary", ("2026-10-24",)) not in api.calls
+    # Race predictor and load focus for the tracker cards.
+    assert rows[0]["race_marathon_s"] == 14900 and rows[1]["race_half_s"] == 6912
+    assert rows[1]["load_anaerobic"] == 35 and rows[1]["load_anaerobic_min"] == 90
+    assert rows[1]["weekly_load_max"] == 811 and rows[1]["chronic_min"] == 398
+
+
+def test_daily_rows_fall_back_to_max_metrics_vo2max():
+    api = fake.FakeGarmin()
+    api.get_training_status = lambda d: {"mostRecentTrainingStatus": None}
+    rows = service.daily_rows(api, date(2026, 10, 24), date(2026, 10, 25))
+    assert rows[0]["vo2max"] == 47.2 and rows[1]["vo2max"] is None
+
+
+def test_run_rows_are_flat_numbers():
+    rows = service.run_rows(fake.FakeGarmin(), date(2026, 10, 25), date(2026, 10, 25))
+    r = rows[0]
+    assert r["id"] == "20712345678" and r["date"] == "2026-10-25" and r["time"] == "05:31"
+    assert r["km"] == 8.012 and r["moving_s"] == 3310 and r["te_label"] == "aerobic base"
+    assert r["cadence_spm"] == 171 and r["stride_m"] == 0.84 and r["load"] == 72
 
 
 def test_performance_falls_back_to_training_status_vo2max():
