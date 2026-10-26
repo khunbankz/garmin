@@ -195,6 +195,7 @@ def create_workout(
     date: str | None = None,
     description: str | None = None,
     dry_run: bool = False,
+    replace: bool = False,
 ) -> dict[str, Any]:
     """Create a running workout in the user's Garmin library and, with `date`
     (YYYY-MM-DD), put it on the Garmin calendar so it syncs to the watch.
@@ -202,18 +203,20 @@ def create_workout(
     steps: in order. A step is {"kind": warmup|run|recovery|rest|cooldown,
     "distance_km" or "duration" ("m:ss"), optional "pace" ("5:35-5:45" per km),
     "hr" ("140-150" bpm), "note"}; with neither distance nor duration it ends on
-    the lap button. A block is {"repeat": N, "steps": [...]}; its last recovery
-    is skipped unless skip_last_recovery is false.
+    the lap button (add "about_km" so the time estimate counts it). A block is
+    {"repeat": N, "steps": [...]}; its last recovery is skipped unless
+    skip_last_recovery is false.
     Example tempo: [{"kind":"warmup","distance_km":2},
     {"repeat":2,"steps":[{"kind":"run","distance_km":3,"pace":"5:35-5:45"},
     {"kind":"recovery","duration":"2:00"}]},{"kind":"cooldown","distance_km":2}]
 
     Keep names short and plain ASCII so the watch shows them. If a workout with
-    the same name is already on that day it is skipped. dry_run returns the
-    steps and estimate without uploading."""
+    the same name is already on that day it is skipped, or with replace=true
+    rewritten in place (same calendar entry; only workouts garmin-mcp made).
+    dry_run returns the steps and estimate without uploading."""
     day = parse_day(date, "date") if date else None
-    items = [s.model_dump() for s in steps]
-    return _run(lambda api: service.create_workout(api, name, items, day, description, dry_run))
+    items = [s.model_dump(exclude_none=True) for s in steps]
+    return _run(lambda api: service.create_workout(api, name, items, day, description, dry_run, replace))
 
 
 @mcp.tool(annotations=READ_ONLY)

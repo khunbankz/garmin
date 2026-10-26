@@ -175,3 +175,26 @@ def test_cli_push(home, tmp_path, capsys):
     assert out.count("✓ ") == 2 and "2026-10-29  HMP 4k" in out and "pace 5:35-5:40/km" in out
     cli_workouts.main(["push", str(plan), "--dry-run"])
     assert capsys.readouterr().out.count("· 2026-") == 2
+
+
+def test_replace_rewrites_in_place_and_only_ours():
+    api = fake.FakeGarmin()
+    first = service.create_workout(api, "Tempo 2x3k", TEMPO, date(2026, 10, 27))
+    api.workouts[first["workout_id"]]["ownerId"] = 42  # a field Garmin adds
+    lap_warmup = [{"kind": "warmup", "about_km": 2.6, "note": "1 loop, drink, then LAP"}] + TEMPO[1:]
+    res = service.create_workout(api, "Tempo 2x3k", lap_warmup, date(2026, 10, 27), replace=True)
+    assert res["replaced"] and res["workout_id"] == first["workout_id"] and res["schedule_id"] == first["schedule_id"]
+    stored = api.workouts[first["workout_id"]]
+    assert stored["ownerId"] == 42
+    assert W.describe(stored)[0] == "warmup · until lap button · (1 loop, drink, then LAP)"
+    assert len(api.workouts) == 2 and len(api.schedules) == 2
+    # Lap-button warmup counts its about_km: 2.6 km at 7:00 instead of 2 km.
+    assert res["estimated"]["km"] == pytest.approx(8.9, abs=0.05)
+    # The user's own workout on 28 Oct is never replaced.
+    with pytest.raises(ValueError, match="not created by garmin-mcp"):
+        service.create_workout(api, "My own intervals", TEMPO, date(2026, 10, 28), replace=True)
+
+
+def test_about_km_only_for_lap_steps():
+    with pytest.raises(ValueError, match="about_km"):
+        W.parse_items([{"kind": "warmup", "distance_km": 2, "about_km": 2.6}])

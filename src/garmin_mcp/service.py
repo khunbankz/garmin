@@ -223,11 +223,14 @@ def create_workout(
     day: date | None = None,
     description: str | None = None,
     dry_run: bool = False,
+    replace: bool = False,
 ) -> dict[str, Any]:
     """Upload a running workout and, with a day, put it on the calendar.
 
     A workout with the same name already on that day is left alone, so running
-    the same plan twice does not create duplicates.
+    the same plan twice does not create duplicates. With ``replace`` it is
+    rewritten in place instead (same workout id, same calendar entry), but only
+    if this server created it.
     """
     items = W.parse_items(steps)
     payload = W.build(name, items, description)
@@ -242,6 +245,8 @@ def create_workout(
         return {**out, "dry_run": True}
     if day:
         same = [r for r in scheduled_workouts(api, day, day) if (r["name"] or "").strip() == payload["workoutName"]]
+        if same and replace:
+            return {**out, **_replace(api, same[0], payload)}
         if same:
             return {**out, "skipped": "a workout with this name is already on the calendar that day", "existing": same[0]}
     created = api.upload_workout(payload) or {}
@@ -259,6 +264,20 @@ def create_workout(
             return out
         out["schedule_id"] = _schedule_id(resp)
     return out
+
+
+def _replace(api: Any, scheduled: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    workout_id = scheduled["workout_id"]
+    current = api.get_workout_by_id(workout_id) or {}
+    if not W.is_ours(current):
+        raise ValueError(
+            f"{scheduled['name']} on {scheduled['date']} was not created by garmin-mcp, so it is not replaced."
+        )
+    # Garmin replaces the whole workout on PUT; start from what it stored so
+    # fields we do not send (owner, author, sharing) stay as they were.
+    body = {k: v for k, v in current.items() if k not in ("workoutSegments", "estimatedDistanceInMeters")}
+    api.update_workout(workout_id, {**body, **payload})
+    return {"replaced": True, "workout_id": workout_id, "schedule_id": scheduled["schedule_id"]}
 
 
 def _brief(w: dict[str, Any]) -> dict[str, Any]:

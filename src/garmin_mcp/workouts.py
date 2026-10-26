@@ -108,11 +108,16 @@ class Step(BaseModel):
     pace: str | None = Field(None, description="Target pace range per km, e.g. 5:35-5:45")
     hr: str | None = Field(None, description="Target heart-rate range in bpm, e.g. 140-150")
     note: str | None = Field(None, max_length=100, description="Short note shown with the step on the watch")
+    about_km: float | None = Field(
+        None, gt=0, le=100, description="Expected km of a lap-button step, only for the time estimate"
+    )
 
     @model_validator(mode="after")
     def _check(self) -> Step:
         if self.distance_km is not None and self.duration is not None:
             raise ValueError("give distance_km or duration, not both")
+        if self.about_km is not None and (self.distance_km is not None or self.duration is not None):
+            raise ValueError("about_km is only for steps that end on the lap button")
         if self.duration is not None and parse_clock(self.duration) <= 0:
             raise ValueError("duration must be more than 0")
         if self.pace is not None:
@@ -195,14 +200,16 @@ def _step_json(step: Step, order: int, child: int | None) -> dict[str, Any]:
 
 
 def _step_estimate(step: Step) -> tuple[float, float]:
-    """(seconds, meters) the step is expected to take; lap-button steps count as 0."""
+    """(seconds, meters) the step is expected to take; a lap-button step counts
+    its about_km, or 0 without one."""
     if step.duration is not None:
         sec = float(parse_clock(step.duration))
         per_km = sum(parse_pace(step.pace)) / 2 if step.pace else _DEFAULT_SEC_PER_KM
         return sec, sec / per_km * 1000
-    if step.distance_km is not None:
+    km = step.distance_km if step.distance_km is not None else step.about_km
+    if km is not None:
         per_km = sum(parse_pace(step.pace)) / 2 if step.pace else _DEFAULT_SEC_PER_KM
-        return step.distance_km * per_km, step.distance_km * 1000
+        return km * per_km, km * 1000
     return 0.0, 0.0
 
 

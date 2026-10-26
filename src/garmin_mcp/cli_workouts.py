@@ -1,6 +1,6 @@
 """Create running workouts in Garmin Connect and put them on the calendar.
 
-    uv run garmin-mcp-workouts push plan.json [--dry-run]
+    uv run garmin-mcp-workouts push plan.json [--dry-run] [--replace]
     uv run garmin-mcp-workouts scheduled [--start 2026-10-27] [--end 2026-11-22]
     uv run garmin-mcp-workouts list | show ID | move SCHEDULE_ID DATE
     uv run garmin-mcp-workouts unschedule SCHEDULE_ID | delete WORKOUT_ID
@@ -8,8 +8,9 @@
 plan.json is a list of {"name", "date", "description"?, "steps"} with steps in
 the same form as the create_workout tool. Every workout is checked before
 anything is uploaded; one that is already on its day under the same name is
-skipped, so pushing the same file twice is safe. delete only removes workouts
-this tool created.
+skipped, so pushing the same file twice is safe, or with --replace rewritten in
+place (same calendar entry). delete and --replace only touch workouts this
+tool created.
 """
 
 from __future__ import annotations
@@ -48,18 +49,20 @@ def load_plan(path: str) -> list[dict[str, Any]]:
     return plan
 
 
-def _push(sess: GarminSession, plan: list[dict[str, Any]], dry_run: bool, pause: float) -> int:
+def _push(sess: GarminSession, plan: list[dict[str, Any]], dry_run: bool, pause: float, replace: bool = False) -> int:
     failed = 0
     for i, w in enumerate(plan):
         day = parse_day(w["date"], "date") if w.get("date") else None
         res = sess.call(
             lambda api, w=w, day=day: service.create_workout(
-                api, w["name"], w["steps"], day, w.get("description"), dry_run
+                api, w["name"], w["steps"], day, w.get("description"), dry_run, replace
             )
         )
         head = f"{res['date'] or 'no date'}  {res['name']}  (~{res['estimated']['minutes']} min, {res['estimated']['km']} km)"
         if dry_run:
             print(f"· {head}")
+        elif res.get("replaced"):
+            print(f"↻ {head}: workout {res['workout_id']} updated in place")
         elif res.get("skipped"):
             print(f"= {head}: already on the calendar, skipped")
         elif res.get("schedule_error"):
@@ -82,6 +85,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("plan")
     p.add_argument("--dry-run", action="store_true", help="check and print, upload nothing")
     p.add_argument("--pause", type=float, default=1.0, help="seconds between workouts")
+    p.add_argument("--replace", action="store_true", help="rewrite workouts already on their day")
     p = sub.add_parser("scheduled", help="workouts on the calendar")
     p.add_argument("--start")
     p.add_argument("--end")
@@ -99,7 +103,7 @@ def main(argv: list[str] | None = None) -> None:
         plan = load_plan(args.plan) if args.cmd == "push" else None
         sess = GarminSession(load_config())
         if args.cmd == "push":
-            failed = _push(sess, plan, args.dry_run, args.pause)
+            failed = _push(sess, plan, args.dry_run, args.pause, args.replace)
             if failed:
                 sys.exit(2)
             return

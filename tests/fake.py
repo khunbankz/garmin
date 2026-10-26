@@ -354,6 +354,11 @@ class FakeGarmin:
         self.workouts[wid] = {**copy.deepcopy(payload), "workoutId": wid, "createdDate": "2026-10-26T14:00:00.0"}
         return copy.deepcopy(self.workouts[wid])
 
+    def update_workout(self, workout_id: Any, payload: dict[str, Any]) -> None:
+        self._rec("update_workout", workout_id, payload)
+        wid = int(workout_id)
+        self.workouts[wid] = {**copy.deepcopy(payload), "workoutId": wid}
+
     def get_workouts(self, start: int = 0, limit: int = 100) -> list[dict[str, Any]]:
         self._rec("get_workouts", start, limit)
         return [copy.deepcopy(w) for w in reversed(self.workouts.values())][start : start + limit]

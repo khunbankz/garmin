@@ -67,7 +67,7 @@ Daily rows are the `get_daily` fields plus the race predictor (seconds), load fo
 
 ## Workouts
 
-A workout is a list of steps and repeat blocks. A step ends after `distance_km` or `duration` (`m:ss`), or on the lap button if neither is given; `pace` (`"5:35-5:45"` per km) and `hr` (`"140-150"`) are the targets the watch alerts on (with both, HR is the secondary target). A repeat block skips its last recovery by default.
+A workout is a list of steps and repeat blocks. A step ends after `distance_km` or `duration` (`m:ss`), or on the lap button if neither is given (add `about_km` so the time estimate counts it); `pace` (`"5:35-5:45"` per km) and `hr` (`"140-150"`) are the targets the watch alerts on (with both, HR is the secondary target). A repeat block skips its last recovery by default.
 
 ```json
 [
@@ -88,7 +88,7 @@ uv run garmin-mcp-workouts scheduled --start 2026-10-27       # what is on the c
 uv run garmin-mcp-workouts show WORKOUT_ID                    # read a workout back from Garmin
 ```
 
-Every workout in the file is checked before anything is uploaded. One that is already on its day under the same name is skipped, so pushing a file twice is safe. Each workout this tool creates gets `[garmin-mcp]` in its description; `delete` refuses anything without it.
+Every workout in the file is checked before anything is uploaded. One that is already on its day under the same name is skipped, so pushing a file twice is safe; with `--replace` it is rewritten in place instead (same workout id and calendar entry), which is how to change a plan. Each workout this tool creates gets `[garmin-mcp]` in its description; `delete` refuses anything without it.
 
 ## Troubleshooting
 
