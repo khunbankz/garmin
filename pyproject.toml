@@ -1,7 +1,7 @@
 [project]
 name = "garmin-mcp"
 version = "0.1.0"
-description = "Local, read-only MCP server for your own Garmin Connect data (readiness, HRV, training load, VO2max, race predictor, running dynamics)."
+description = "Local MCP server for your own Garmin Connect data (readiness, HRV, training load, VO2max, race predictor, running dynamics) that can also put running workouts on your Garmin calendar."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
 garmin-mcp = "garmin_mcp.server:main"
 garmin-mcp-auth = "garmin_mcp.cli_auth:main"
 garmin-mcp-export = "garmin_mcp.cli_export:main"
+garmin-mcp-workouts = "garmin_mcp.cli_workouts:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

@@ -12,6 +12,7 @@ from datetime import date
 from typing import Any
 
 from . import transform as T
+from . import workouts as W
 from .dates import each_day
 
 # Errors that mean "stop and tell the user", not "this one section failed".
@@ -172,6 +173,144 @@ def run_rows(api: Any, start: date, end: date) -> list[dict[str, Any]]:
     """Garmin runs (all running sub-types) as flat rows, oldest first."""
     raw = api.get_activities_by_date(start.isoformat(), end.isoformat(), "running", "asc")
     return [T.run_row(a) for a in raw or [] if isinstance(a, dict)]
+
+
+# ---- workouts: the only calls that change anything in Garmin Connect ----------
+
+
+def _months(start: date, end: date) -> list[tuple[int, int]]:
+    out, y, m = [], start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        out.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def scheduled_workouts(api: Any, start: date, end: date) -> list[dict[str, Any]]:
+    """Workouts on the Garmin calendar between two days (from the calendar service)."""
+    s, e = start.isoformat(), end.isoformat()
+    rows = []
+    for y, m in _months(start, end):
+        cal = api.get_scheduled_workouts(y, m) or {}
+        for item in cal.get("calendarItems") or []:
+            d = item.get("date") or ""
+            if item.get("itemType") == "workout" and s <= d <= e:
+                rows.append(
+                    {
+                        "date": d,
+                        "schedule_id": item.get("id"),
+                        "workout_id": item.get("workoutId"),
+                        "name": item.get("title"),
+                    }
+                )
+    return sorted(rows, key=lambda r: (r["date"], r["name"] or ""))
+
+
+def _schedule_id(resp: Any) -> Any:
+    if not isinstance(resp, dict):
+        return None
+    return resp.get("workoutScheduleId") or resp.get("scheduleId") or resp.get("id")
+
+
+def create_workout(
+    api: Any,
+    name: str,
+    steps: Any,
+    day: date | None = None,
+    description: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Upload a running workout and, with a day, put it on the calendar.
+
+    A workout with the same name already on that day is left alone, so running
+    the same plan twice does not create duplicates.
+    """
+    items = W.parse_items(steps)
+    payload = W.build(name, items, description)
+    sec, dist = W.estimate(items)
+    out: dict[str, Any] = {
+        "name": payload["workoutName"],
+        "date": day.isoformat() if day else None,
+        "steps": W.describe(payload),
+        "estimated": {"minutes": round(sec / 60), "km": round(dist / 1000, 1)},
+    }
+    if dry_run:
+        return {**out, "dry_run": True}
+    if day:
+        same = [r for r in scheduled_workouts(api, day, day) if (r["name"] or "").strip() == payload["workoutName"]]
+        if same:
+            return {**out, "skipped": "a workout with this name is already on the calendar that day", "existing": same[0]}
+    created = api.upload_workout(payload) or {}
+    workout_id = created.get("workoutId") if isinstance(created, dict) else None
+    if not workout_id:
+        raise ValueError("Garmin accepted the workout but returned no workout id")
+    out["workout_id"] = workout_id
+    if day:
+        try:
+            resp = api.schedule_workout(workout_id, day.isoformat())
+        except Exception as e:
+            if _fatal(e):
+                raise
+            out["schedule_error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            return out
+        out["schedule_id"] = _schedule_id(resp)
+    return out
+
+
+def _brief(w: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "workout_id": w.get("workoutId"),
+        "name": w.get("workoutName"),
+        "sport": T.get(w, "sportType", "sportTypeKey"),
+        "created": w.get("createdDate"),
+        "updated": w.get("updatedDate"),
+        "estimated_minutes": round(w["estimatedDurationInSecs"] / 60) if w.get("estimatedDurationInSecs") else None,
+        "by_garmin_mcp": W.is_ours(w) if "description" in w else None,
+    }
+
+
+def list_workouts(api: Any, limit: int = 30) -> list[dict[str, Any]]:
+    if not 1 <= limit <= 200:
+        raise ValueError("limit must be 1-200")
+    return [_brief(w) for w in api.get_workouts(0, limit) or [] if isinstance(w, dict)]
+
+
+def show_workout(api: Any, workout_id: str) -> dict[str, Any]:
+    w = api.get_workout_by_id(workout_id) or {}
+    return {**_brief(w), "description": w.get("description"), "steps": W.describe(w)}
+
+
+def move_scheduled(api: Any, schedule_id: str, day: date) -> dict[str, Any]:
+    """Schedule the same workout on the new day, then take it off the old one."""
+    cur = api.get_scheduled_workout_by_id(schedule_id) or {}
+    workout_id = T.get(cur, "workout", "workoutId") or cur.get("workoutId")
+    if not workout_id:
+        raise ValueError(f"No scheduled workout with id {schedule_id}")
+    resp = api.schedule_workout(workout_id, day.isoformat())
+    api.unschedule_workout(schedule_id)
+    return {
+        "workout_id": workout_id,
+        "from": cur.get("calendarDate") or cur.get("date"),
+        "to": day.isoformat(),
+        "schedule_id": _schedule_id(resp),
+    }
+
+
+def unschedule(api: Any, schedule_id: str) -> dict[str, Any]:
+    api.unschedule_workout(schedule_id)
+    return {"unscheduled": schedule_id}
+
+
+def delete_workout(api: Any, workout_id: str) -> dict[str, Any]:
+    """Delete a workout template, but only one this server created."""
+    w = api.get_workout_by_id(workout_id) or {}
+    if not W.is_ours(w):
+        raise ValueError(
+            f"Workout {workout_id} ({w.get('workoutName') or 'unknown'}) was not created by garmin-mcp, "
+            "so it is left alone. Delete it in the Garmin Connect app if you really want it gone."
+        )
+    api.delete_workout(workout_id)
+    return {"deleted": workout_id, "name": w.get("workoutName")}
 
 
 # Read-only methods the debug tool may call, with the arguments each takes.

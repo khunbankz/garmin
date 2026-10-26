@@ -1,9 +1,13 @@
-"""MCP server (stdio). Claude Desktop starts it; every tool is read-only."""
+"""MCP server (stdio). Claude Desktop starts it.
+
+Everything is read-only except the workout tools, which create workouts in the
+user's Garmin library and put them on the Garmin calendar."""
 
 from __future__ import annotations
 
 import logging
 import sys
+from datetime import timedelta
 from typing import Any
 
 from mcp.server import MCPServer
@@ -12,9 +16,10 @@ from mcp.types import ToolAnnotations
 
 from . import service
 from .config import load_config
-from .dates import resolve_range
+from .dates import parse_day, resolve_range
 from .errors import GarminMcpError
 from .session import GarminSession
+from .workouts import Repeat, Step
 
 INSTRUCTIONS = """\
 Read-only access to the user's own Garmin Connect data: Training Readiness,
@@ -24,9 +29,18 @@ running dynamics (cadence, stride, ground contact time, vertical oscillation),
 power and training effect. Dates are local calendar days (YYYY-MM-DD),
 inclusive. Start with get_today when reviewing training or deciding today's
 session. Paces are min:sec per km.
+
+Workout tools change the user's Garmin account: create_workout uploads a running
+workout and puts it on the Garmin calendar so it syncs to the watch;
+move_workout, unschedule_workout and delete_workout change or remove it. Use
+them only when the user asked for workouts to be created or changed, check the
+calendar first with get_scheduled_workouts, and say what was changed.
+delete_workout only removes workouts this server created.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True)
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True)
+REMOVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
 
 mcp = MCPServer(name="garmin", instructions=INSTRUCTIONS)
 _session: GarminSession | None = None
@@ -172,6 +186,82 @@ def get_raw(
 ) -> Any:
     args = {"date": date, "start_date": start_date, "end_date": end_date, "activity_id": activity_id}
     return _run(lambda api: service.raw(api, method, args))
+
+
+@mcp.tool(annotations=WRITE)
+def create_workout(
+    name: str,
+    steps: list[Step | Repeat],
+    date: str | None = None,
+    description: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Create a running workout in the user's Garmin library and, with `date`
+    (YYYY-MM-DD), put it on the Garmin calendar so it syncs to the watch.
+
+    steps: in order. A step is {"kind": warmup|run|recovery|rest|cooldown,
+    "distance_km" or "duration" ("m:ss"), optional "pace" ("5:35-5:45" per km),
+    "hr" ("140-150" bpm), "note"}; with neither distance nor duration it ends on
+    the lap button. A block is {"repeat": N, "steps": [...]}; its last recovery
+    is skipped unless skip_last_recovery is false.
+    Example tempo: [{"kind":"warmup","distance_km":2},
+    {"repeat":2,"steps":[{"kind":"run","distance_km":3,"pace":"5:35-5:45"},
+    {"kind":"recovery","duration":"2:00"}]},{"kind":"cooldown","distance_km":2}]
+
+    Keep names short and plain ASCII so the watch shows them. If a workout with
+    the same name is already on that day it is skipped. dry_run returns the
+    steps and estimate without uploading."""
+    day = parse_day(date, "date") if date else None
+    items = [s.model_dump() for s in steps]
+    return _run(lambda api: service.create_workout(api, name, items, day, description, dry_run))
+
+
+@mcp.tool(annotations=READ_ONLY)
+def get_scheduled_workouts(start_date: str | None = None, end_date: str | None = None) -> list[dict[str, Any]]:
+    """Workouts on the Garmin calendar: date, schedule_id, workout_id, name.
+    Default today and the next 13 days, max 92 days."""
+
+    def fn(api: Any) -> Any:
+        first = parse_day(start_date, "start_date") if start_date else service.today(api)
+        last = parse_day(end_date, "end_date") if end_date else first + timedelta(days=13)
+        s, e = resolve_range(first.isoformat(), last.isoformat(), first, max_days=92)
+        return service.scheduled_workouts(api, s, e)
+
+    return _run(fn)
+
+
+@mcp.tool(annotations=READ_ONLY)
+def get_workouts(limit: int = 30) -> list[dict[str, Any]]:
+    """Workouts in the user's Garmin library (newest first): id, name, sport,
+    created, estimated minutes, and whether garmin-mcp created it."""
+    return _run(lambda api: service.list_workouts(api, limit))
+
+
+@mcp.tool(annotations=READ_ONLY)
+def get_workout(workout_id: str) -> dict[str, Any]:
+    """One workout as Garmin stored it, one line per step with its targets."""
+    return _run(lambda api: service.show_workout(api, str(workout_id)))
+
+
+@mcp.tool(annotations=WRITE)
+def move_workout(schedule_id: str, date: str) -> dict[str, Any]:
+    """Move a workout on the Garmin calendar to another day (YYYY-MM-DD). Get
+    schedule_id from get_scheduled_workouts."""
+    day = parse_day(date, "date")
+    return _run(lambda api: service.move_scheduled(api, str(schedule_id), day))
+
+
+@mcp.tool(annotations=REMOVE)
+def unschedule_workout(schedule_id: str) -> dict[str, Any]:
+    """Take a workout off the Garmin calendar; the workout stays in the library."""
+    return _run(lambda api: service.unschedule(api, str(schedule_id)))
+
+
+@mcp.tool(annotations=REMOVE)
+def delete_workout(workout_id: str) -> dict[str, Any]:
+    """Delete a workout from the library (and the calendar). Refuses workouts
+    that garmin-mcp did not create."""
+    return _run(lambda api: service.delete_workout(api, str(workout_id)))
 
 
 def main() -> None:

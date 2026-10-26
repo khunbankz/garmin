@@ -1,6 +1,6 @@
 # garmin-mcp
 
-A small local [MCP](https://modelcontextprotocol.io) server that gives Claude **read-only** access to your own Garmin Connect data — the metrics Strava does not pass on: Training Readiness, HRV status, training status and load, VO2 max, lactate threshold, race predictor, Body Battery, sleep, and per-activity running dynamics, power and training effect.
+A small local [MCP](https://modelcontextprotocol.io) server that gives Claude access to your own Garmin Connect data — the metrics Strava does not pass on: Training Readiness, HRV status, training status and load, VO2 max, lactate threshold, race predictor, Body Battery, sleep, and per-activity running dynamics, power and training effect. Everything is read-only except the workout tools, which put structured running workouts on your Garmin calendar so they sync to the watch.
 
 It runs on your own Mac (Claude Desktop starts it over stdio). It uses the unofficial [`garminconnect`](https://github.com/cyberjunky/python-garminconnect) library, because Garmin's official API is only open to approved businesses. You log in once in your own Terminal; only the resulting tokens are saved, in `~/.garmin-mcp/` (mode 600). Your password is never stored.
 
@@ -21,6 +21,12 @@ It runs on your own Mac (Claude Desktop starts it over stdio). It uses the unoff
 | `get_activity_laps` | One activity's summary plus every lap or workout step with the same metrics |
 | `get_daily` | One compact row per day for trends |
 | `get_raw` | Debugging: the unprocessed response of one whitelisted read call |
+| `get_scheduled_workouts` | Workouts on the Garmin calendar (default the next 14 days) |
+| `get_workouts` / `get_workout` | The workout library; one workout's steps and targets as Garmin stored them |
+| `create_workout` ✏️ | Create a running workout from a short step list and put it on a day |
+| `move_workout` ✏️ | Move a scheduled workout to another day |
+| `unschedule_workout` ✏️ | Take a workout off the calendar (it stays in the library) |
+| `delete_workout` ✏️ | Delete a workout — only ones this server created |
 
 Range tools take optional `start_date` / `end_date` (`YYYY-MM-DD`, inclusive; default last 7 days, max 31). "Today" follows the timezone in your Garmin profile.
 
@@ -59,6 +65,31 @@ uv run garmin-mcp-export --start 2026-10-25 --out exports/garmin-daily.json \
 
 Daily rows are the `get_daily` fields plus the race predictor (seconds), load focus with its target band, weekly load target and chronic-load range; fetched 31 days at a time with a short pause between per-day calls. `--runs-out` also writes every Garmin run in the span as flat numbers (distance, moving time, HR, cadence, stride, ground contact, power, Training Effect and load). `exports/` is git-ignored.
 
+## Workouts
+
+A workout is a list of steps and repeat blocks. A step ends after `distance_km` or `duration` (`m:ss`), or on the lap button if neither is given; `pace` (`"5:35-5:45"` per km) and `hr` (`"140-150"`) are the targets the watch alerts on (with both, HR is the secondary target). A repeat block skips its last recovery by default.
+
+```json
+[
+  {"name": "Tempo 2x3k", "date": "2026-10-27", "description": "HR cap 168",
+   "steps": [
+     {"kind": "warmup", "distance_km": 2},
+     {"repeat": 2, "steps": [
+       {"kind": "run", "distance_km": 3, "pace": "5:35-5:45"},
+       {"kind": "recovery", "duration": "2:00"}]},
+     {"kind": "cooldown", "distance_km": 2}]}
+]
+```
+
+```bash
+uv run garmin-mcp-workouts push exports/plan.json --dry-run   # check and print only
+uv run garmin-mcp-workouts push exports/plan.json             # create + schedule, then sync the watch
+uv run garmin-mcp-workouts scheduled --start 2026-10-27       # what is on the calendar
+uv run garmin-mcp-workouts show WORKOUT_ID                    # read a workout back from Garmin
+```
+
+Every workout in the file is checked before anything is uploaded. One that is already on its day under the same name is skipped, so pushing a file twice is safe. Each workout this tool creates gets `[garmin-mcp]` in its description; `delete` refuses anything without it.
+
 ## Troubleshooting
 
 - **"Garmin is not connected yet" / "rejected the saved login"**: run `uv run garmin-mcp-auth` again.
@@ -71,7 +102,7 @@ Daily rows are the `get_daily` fields plus the race predictor (seconds), load fo
 - The server only reads the saved tokens; it never sees your password. The library refreshes the access token itself and saves the rotated tokens.
 - The server and the export CLI may run at the same time, so every call holds a lock file in `~/.garmin-mcp/` and reloads the token file first if another process changed it. That way no one refreshes with an already-used refresh token.
 - Combined answers (`get_today`, `get_performance`, `get_daily`) keep going when one part fails and show that part's error; a rejected login or a rate limit stops the call with a clear message.
-- There are no write tools; `get_raw` only allows a fixed list of read calls.
+- The only calls that change anything are the workout tools (create, schedule, move, unschedule, delete your own workouts); `get_raw` only allows a fixed list of read calls.
 
 ## Development
 

@@ -38,6 +38,16 @@ async def _exercise(home: Path) -> dict:
             out["laps"] = await s.call_tool("get_activity_laps", {"activity_id": "20712345678"})
             out["bad_range"] = await s.call_tool("get_daily", {"start_date": "2026-01-01", "end_date": "2026-10-25"})
             out["raw"] = await s.call_tool("get_raw", {"method": "get_race_predictions"})
+            steps = [
+                {"kind": "warmup", "distance_km": 2},
+                {"repeat": 2, "steps": [{"kind": "run", "distance_km": 3, "pace": "5:35-5:45"},
+                                        {"kind": "recovery", "duration": "2:00"}]},
+                {"kind": "cooldown", "distance_km": 2},
+            ]
+            out["create"] = await s.call_tool("create_workout", {"name": "Tempo 2x3k", "steps": steps, "date": "2026-10-27"})
+            out["scheduled"] = await s.call_tool("get_scheduled_workouts", {"start_date": "2026-10-27"})
+            out["bad_step"] = await s.call_tool("create_workout", {"name": "x", "steps": [{"kind": "run", "pace": "fast"}]})
+            out["delete_theirs"] = await s.call_tool("delete_workout", {"workout_id": "77"})
     return out
 
 
@@ -45,12 +55,16 @@ def test_stdio_end_to_end(tmp_path):
     (tmp_path / "garmin_tokens.json").write_text("{}")
     out = anyio.run(_exercise, tmp_path)
 
-    assert set(out["tools"]) == {
+    read = {
         "get_today", "get_readiness", "get_hrv", "get_sleep", "get_training_status",
         "get_performance", "get_race_predictions", "get_activities", "get_activity_laps",
-        "get_daily", "get_raw",
+        "get_daily", "get_raw", "get_scheduled_workouts", "get_workouts", "get_workout",
     }
-    assert all(t.annotations and t.annotations.read_only_hint for t in out["tools"].values())
+    write = {"create_workout", "move_workout", "unschedule_workout", "delete_workout"}
+    assert set(out["tools"]) == read | write
+    assert all(out["tools"][n].annotations.read_only_hint for n in read)
+    assert not any(out["tools"][n].annotations.read_only_hint for n in write)
+    assert out["tools"]["delete_workout"].annotations.destructive_hint
     assert "get_activity_splits" in out["tools"]["get_raw"].description
 
     today = json.loads(_text(out["today"]))
@@ -61,6 +75,13 @@ def test_stdio_end_to_end(tmp_path):
 
     assert out["bad_range"].is_error and "at most 31" in _text(out["bad_range"])
     assert json.loads(_text(out["raw"]))["timeMarathon"] == 14820
+
+    created = json.loads(_text(out["create"]))
+    assert created["schedule_id"] and created["steps"][2].endswith("pace 5:35-5:45/km")
+    names = [json.loads(c.text)["name"] for c in out["scheduled"].content]
+    assert names == ["Tempo 2x3k", "My own intervals"]
+    assert out["bad_step"].is_error and "pace" in _text(out["bad_step"])
+    assert out["delete_theirs"].is_error and "not created by garmin-mcp" in _text(out["delete_theirs"])
 
 
 def test_not_connected_message(tmp_path):

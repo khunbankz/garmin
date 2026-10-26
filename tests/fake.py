@@ -247,6 +247,16 @@ class FakeGarmin:
         self.display_name = "test-runner"
         self.fail: dict[str, BaseException] = {}
         self.logins = 0
+        # An in-memory workout library and calendar, with one workout the user
+        # made in the app (no garmin-mcp marker), scheduled on 28 Oct.
+        self.workouts: dict[int, dict[str, Any]] = {
+            77: {"workoutId": 77, "workoutName": "My own intervals", "description": None,
+                 "sportType": {"sportTypeId": 1, "sportTypeKey": "running"}, "workoutSegments": []}
+        }
+        self.schedules: dict[int, dict[str, Any]] = {
+            500: {"workoutScheduleId": 500, "calendarDate": "2026-10-28", "workout": {"workoutId": 77}}
+        }
+        self._next_id = 1000
 
     def _rec(self, name: str, *args: Any) -> None:
         self.calls.append((name, args))
@@ -331,3 +341,57 @@ class FakeGarmin:
     def get_devices(self) -> list[dict[str, Any]]:
         self._rec("get_devices")
         return [{"productDisplayName": "Forerunner"}]
+
+    # ---- workouts ----
+
+    def _new_id(self) -> int:
+        self._next_id += 1
+        return self._next_id
+
+    def upload_workout(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._rec("upload_workout", payload)
+        wid = self._new_id()
+        self.workouts[wid] = {**copy.deepcopy(payload), "workoutId": wid, "createdDate": "2026-10-26T14:00:00.0"}
+        return copy.deepcopy(self.workouts[wid])
+
+    def get_workouts(self, start: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        self._rec("get_workouts", start, limit)
+        return [copy.deepcopy(w) for w in reversed(self.workouts.values())][start : start + limit]
+
+    def get_workout_by_id(self, workout_id: Any) -> dict[str, Any]:
+        self._rec("get_workout_by_id", workout_id)
+        return copy.deepcopy(self.workouts[int(workout_id)])
+
+    def delete_workout(self, workout_id: Any) -> None:
+        self._rec("delete_workout", workout_id)
+        wid = int(workout_id)
+        del self.workouts[wid]
+        self.schedules = {k: v for k, v in self.schedules.items() if v["workout"]["workoutId"] != wid}
+
+    def schedule_workout(self, workout_id: Any, date_str: str) -> dict[str, Any]:
+        self._rec("schedule_workout", workout_id, date_str)
+        sid = self._new_id()
+        self.schedules[sid] = {"workoutScheduleId": sid, "calendarDate": date_str,
+                               "workout": {"workoutId": int(workout_id)}}
+        return copy.deepcopy(self.schedules[sid])
+
+    def get_scheduled_workout_by_id(self, schedule_id: Any) -> dict[str, Any]:
+        self._rec("get_scheduled_workout_by_id", schedule_id)
+        return copy.deepcopy(self.schedules[int(schedule_id)])
+
+    def unschedule_workout(self, schedule_id: Any) -> None:
+        self._rec("unschedule_workout", schedule_id)
+        del self.schedules[int(schedule_id)]
+
+    def get_scheduled_workouts(self, year: int, month: int) -> dict[str, Any]:
+        self._rec("get_scheduled_workouts", year, month)
+        prefix = f"{year}-{month:02d}-"
+        items: list[dict[str, Any]] = [
+            {"id": 9, "itemType": "activity", "date": f"{prefix}05", "title": "Morning Run"}
+        ]
+        for sid, sch in self.schedules.items():
+            if sch["calendarDate"].startswith(prefix):
+                wid = sch["workout"]["workoutId"]
+                items.append({"id": sid, "itemType": "workout", "date": sch["calendarDate"],
+                              "title": self.workouts[wid]["workoutName"], "workoutId": wid})
+        return {"startDate": f"{prefix}01", "calendarItems": items}
